@@ -1,37 +1,94 @@
 import { Command } from 'commander';
 import http from 'http';
-import {readFileSync, writeFileSync} from 'fs';
+import { readFile } from 'fs/promises'; 
+import { URL } from 'url';
+import { XMLBuilder } from 'fast-xml-parser';
 
 const program = new Command();
-
-program.option('-i, --input [input]', 'Вхідний файл');
-program.option('-h, --host [host]', 'Хост');
-program.option('-p, --port [port]', 'Порт');
-
+program
+    .option('-i, --input [input]', 'Вхідний файл')
+    .option('-h, --host [host]', 'Хост сервера')
+    .option('-p, --port [port]', 'Порт сервера');
 program.parse(process.argv);
 const options = program.opts();
 
-const input = options.input;
-const host = options.host;
-const port = options.port;
+const INPUT_FILE = options.input;
+const HOST = options.host;
+const PORT = options.port;
 
-// console.log(port)
+//console.log(INPUT_FILE, PORT, HOST)
 
 function check(var1) {
-    return (!var1 || var1==true)
+    return (!var1 || var1==true) 
 }
 
-if (check(input) || check(host) || check(port)) {
-    console.log('Введи усі обов\'язкові параметри.');
+if (check(INPUT_FILE) || check(PORT) || check(HOST)) {
+    console.error('Помилка: Необхідно вказати усі обов\'язкові параметри (--input --host --port).');
     process.exit();
 }
 
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end(`Hello from Node.js Server!\nHost: ${host}, Port: ${port}`);
+function processData(passengers, queryParams) {
+    let result = passengers;
+    
+    if (queryParams.get('survived') === 'true') {
+        result = result.filter(p => p.Survived === "1"); 
+    }
+    
+    return result.map(p => {
+        return {
+            name: `${p.Name}`,
+            age: queryParams.get('age') === 'true' ? `${p.Age}` : undefined,
+            ticket: `${p.Ticket}`,
+        };
+    });
+}
+
+function buildXmlResponse(data) {
+    //console.log(data); 
+
+    const XML_OBJ = {
+        passengers: {
+            passenger: data,
+        }
+    };  
+
+    //console.log(XML_OBJ);
+
+    const builder = new XMLBuilder({});
+    const xml_output = builder.build(XML_OBJ);
+
+    //console.log(xml_output);
+
+    return xml_output;
+}
+
+const server = http.createServer(async (req, res) => {
+    const requestUrl = new URL(req.url, `http://${HOST}:${PORT}`);
+    const queryParams = requestUrl.searchParams;
+
+    //console.log(queryParams);
+
+    let passengers;
+
+    try {
+        const data = await readFile(INPUT_FILE, 'utf-8');
+        passengers = JSON.parse(data);
+    } catch (error) {
+        res.end(`Cannot find input file.`); 
+        return;
+    }
+
+    //console.log(typeof(passengers));
+
+    const processedData = processData(passengers, queryParams);
+
+    const xmlResponse = buildXmlResponse(processedData);
+
+    res.writeHead(200, { 'Content-Type': 'application/xml' }); 
+    res.end(xmlResponse);
 });
 
-server.listen(port, host, () => {
-  console.log(`Сервер запущено: http://${host}:${port}`);
-  console.log('Натисніть Ctrl+C для зупинки.');
+server.listen(PORT, HOST, () => {
+    console.log(`Сервер запущено: http://${HOST}:${PORT}`);
+    console.log('Натисни Ctrl+C для зупинки.');
 });
